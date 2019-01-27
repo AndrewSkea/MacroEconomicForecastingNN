@@ -1,0 +1,7 @@
+*/log.txt
+*/logdata/log.txt
+src/logdata/log.txt
+FirstInstance.pem
+*.pyc
+*/__pycache__/*
+.idea/*
