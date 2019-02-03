@@ -3,34 +3,45 @@ from sklearn.metrics import mean_squared_error
 from math import sqrt
 import numpy as np
 import logging
+import os
 from pandas import read_csv, DataFrame, concat
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Dense, LSTM
 
+# Settings from environment variables
+col_to_predict = str(os.environ.get('COLUMN_TO_PREDICT'))
+cols_to_use_for_prediction = [int(x) for x in os.environ.get('COLUMNS_FOR_PREDICTION').split(',')]
+layer_setup = [int(x) for x in os.environ.get('LAYER_SETUP').split(',')]
+look_back_period = int(os.environ.get('LOOK_BACK_PERIOD'))
+training_split = float(os.environ.get('TRAINING_SPLIT'))
+loss_function = str(os.environ.get('LOSS_FUNCTION'))
+optimizer = str(os.environ.get('OPTIMIZER'))
+num_epochs = int(os.environ.get('NUM_EPOCHS'))
+batch_size = int(os.environ.get('BATCH_SIZE'))
+sequence_length = int(os.environ.get('SEQUENCE_LENGTH'))
+prediction_length = int(os.environ.get('PREDICTION_LENGTH'))
 
-def series_to_supervised(data, n_in=1, column_to_predict='GDP', dropnan=True):
+
+def series_to_supervised(data):
     n_vars = 1 if type(data) is list else data.shape[1]
     df = DataFrame(data)
     cols, names = list(), list()
     # input sequence (t-n, ... t-1)
-    for i in range(n_in, 0, -1):
+    for i in range(look_back_period, 0, -1):
         cols.append(df.shift(-i))
         print(df.columns.values)
         names += [('{}(t-{})'.format(df.columns.values[j], i)) for j in range(n_vars)]
-    cols.append(df[column_to_predict])
-    names.append(column_to_predict)
+    cols.append(df[col_to_predict])
+    names.append(col_to_predict)
     agg = concat(cols, axis=1)
     agg.columns = names
-    # drop rows with NaN values
-    if dropnan:
-        agg.dropna(inplace=True)
-
-    agg.to_csv('../data/uk_data_lag3.csv')
+    agg.dropna(inplace=True)
     return agg
 
-df = read_csv('../data/uk_data.csv', usecols=[1, 2, 3, 4, 5, 6, 7], engine='python')
-df = series_to_supervised(df, 3)
+
+df = read_csv('../data/uk_data.csv', usecols=cols_to_use_for_prediction, engine='python')
+df = series_to_supervised(df)
 logging.info(df.shape)
 logging.info(df.shape)
 df.head(3)
@@ -46,8 +57,7 @@ logging.info(y_data.head(1))
 
 num_data = len(x_data)
 
-train_split = 0.8
-num_train = int(train_split * num_data)
+num_train = int(training_split * num_data)
 logging.info(num_train)
 
 num_test = num_data - num_train
@@ -91,7 +101,6 @@ def batch_generator(batch_size, sequence_length):
     """
     Generator function for creating random batches of training-data.
     """
-
     # Infinite loop.
     while True:
         # Allocate a new array for the batch of input-signals.
@@ -114,10 +123,6 @@ def batch_generator(batch_size, sequence_length):
 
         yield (x_batch, y_batch)
 
-
-batch_size = 20
-sequence_length = 50
-
 generator = batch_generator(batch_size=batch_size,
                             sequence_length=sequence_length)
 
@@ -126,27 +131,19 @@ x_batch, y_batch = next(generator)
 logging.info(x_batch.shape)
 logging.info(y_batch.shape)
 
-batch = 0  # First sequence in the batch.
-signal = 0  # First signal from the 20 input-signals.
-# seq = x_batch[batch, :, signal]
-# plt.plot(seq)
-
-# seq = y_batch[batch, :, signal]
-# plt.plot(seq)
-
 validation_data = (np.expand_dims(x_test_scaled, axis=0),
                    np.expand_dims(y_test_scaled, axis=0))
 
 model = Sequential()
-model.add(LSTM(units=30,
+model.add(LSTM(units=batch_size,
                return_sequences=True,
                input_shape=(None, num_x_signals,)))
 model.add(Dense(num_y_signals, activation='linear'))
-model.compile(loss='mae', optimizer='adam')
+model.compile(loss=loss_function, optimizer=optimizer)
 model.summary()
 
 model.fit_generator(generator=generator,
-                    epochs=25,
+                    epochs=num_epochs,
                     steps_per_epoch=20,
                     validation_data=validation_data)
 
@@ -154,7 +151,7 @@ result = model.evaluate(x=np.expand_dims(x_test_scaled, axis=0),
                         y=np.expand_dims(y_test_scaled, axis=0))
 
 
-def plot_comparison(start_idx, length=100, train=True, target_names=('var1',)):
+def plot_comparison(start_idx, target_names, length=100, train=True):
     """
     Plot the predicted and true output-signals.
     
@@ -193,34 +190,33 @@ def plot_comparison(start_idx, length=100, train=True, target_names=('var1',)):
     y_pred_rescaled = y_scaler.inverse_transform(y_pred[0])
 
     # For each output-signal.
-    for signal in range(len(target_names)):
-        logging.info("Predicting {}".format(target_names[signal]))
-        # Get the output-signal predicted by the model.
-        signal_pred = y_pred_rescaled[:, signal]
+    logging.info("Predicting {}".format(target_names))
+    # Get the output-signal predicted by the model.
+    signal_pred = y_pred_rescaled[:, 0]
 
-        # Get the true output-signal from the data-set.
-        logging.info(y_true.shape)
-        signal_true = DataFrame(y_true).iloc[:, signal]
+    # Get the true output-signal from the data-set.
+    logging.info(y_true.shape)
+    signal_true = DataFrame(y_true).iloc[:, 0]
 
-        # Make the plotting-canvas bigger.
-        plt.figure(figsize=(15, 5))
+    # Make the plotting-canvas bigger.
+    plt.figure(figsize=(15, 5))
 
-        # Plot and compare the two signals.
-        plt.plot(signal_true, label='true')
-        plt.plot(signal_pred, label='pred')
+    # Plot and compare the two signals.
+    plt.plot(signal_true, label='true')
+    plt.plot(signal_pred, label='pred')
 
-        # Plot grey box for warmup-period.
-        plt.axvspan(0, warmup_steps, facecolor='black', alpha=0.15)
+    # Plot grey box for warmup-period.
+    plt.axvspan(0, warmup_steps, facecolor='black', alpha=0.15)
 
-        rmse = sqrt(mean_squared_error(y_pred_rescaled, y_true))
-        print('Test RMSE: %.3f' % rmse)
-        # Plot labels etc.
-        plt.ylabel(target_names[signal])
-        plt.xlabel('Time units')
-        plt.legend()
-        plt.title(target_names[signal])
-        plt.show()
+    rmse = sqrt(mean_squared_error(y_pred_rescaled, y_true))
+    print('Test RMSE: %.3f' % rmse)
+    # Plot labels etc.
+    plt.ylabel(target_names)
+    plt.xlabel('Time units')
+    plt.legend()
+    plt.title(target_names)
+    plt.show()
 
 
-warmup_steps = 5
-plot_comparison(start_idx=0, length=250, train=True, target_names=['GDP'])
+warmup_steps = 7
+plot_comparison(start_idx=0, target_names=col_to_predict, length=prediction_length, train=True)
