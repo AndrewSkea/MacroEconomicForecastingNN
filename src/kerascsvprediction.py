@@ -4,7 +4,7 @@ from math import sqrt
 import numpy as np
 import logging
 import os
-from pandas import read_csv, DataFrame, concat
+from pandas import read_csv, DataFrame, concat, Series
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Dense, LSTM
@@ -93,7 +93,7 @@ y_scaler = MinMaxScaler()
 y_train_scaled = y_scaler.fit_transform(y_train)
 y_test_scaled = y_scaler.transform(y_test)
 
-logging.info(x_train_scaled.shape)
+print(x_train_scaled.shape)
 logging.info(y_train_scaled.shape)
 
 
@@ -138,45 +138,35 @@ model = Sequential()
 model.add(LSTM(units=batch_size,
                return_sequences=True,
                input_shape=(None, num_x_signals,)))
-model.add(Dense(num_y_signals, activation='linear'))
+model.add(Dense(num_y_signals, activation='softmax'))
+# model.add(Dense(num_y_signals, activation='tanh'))
 model.compile(loss=loss_function, optimizer=optimizer)
 model.summary()
 
 model.fit_generator(generator=generator,
                     epochs=num_epochs,
-                    steps_per_epoch=20,
+                    steps_per_epoch=int(num_x_signals/batch_size),
                     validation_data=validation_data)
 
 result = model.evaluate(x=np.expand_dims(x_test_scaled, axis=0),
                         y=np.expand_dims(y_test_scaled, axis=0))
 
 
-def plot_comparison(start_idx, target_names, length=100, train=True):
+def plot_comparison(target_names, length=100):
     """
     Plot the predicted and true output-signals.
     
     :param target_names: Name of column you are predicting
-    :param start_idx: Start-index for the time-series.
     :param length: Sequence-length to process and plot.
-    :param train: Boolean whether to use training- or test-set.
     """
-
-    if train:
-        # Use training-data.
-        x = x_train_scaled
-        y_true = y_train
-    else:
-        # Use test-data.
-        x = x_test_scaled
-        y_true = y_test
-
-    # End-index for the sequences.
-    end_idx = start_idx + length
+    # Use test-data.
+    x = x_test_scaled
+    y_true = y_test
 
     # Select the sequences from the given start-index and
     # of the given length.
-    x = x[start_idx:end_idx]
-    y_true = y_true[start_idx:end_idx]
+    x = x[-length:]
+    y_true = y_true[-length:]
 
     # Input-signals for the model.
     x = np.expand_dims(x, axis=0)
@@ -196,14 +186,22 @@ def plot_comparison(start_idx, target_names, length=100, train=True):
 
     # Get the true output-signal from the data-set.
     logging.info(y_true.shape)
-    signal_true = DataFrame(y_true).iloc[:, 0]
-
+    signal_true = DataFrame(data=y_true).iloc[:, 0]
+    signal_true = list(signal_true.items())
     # Make the plotting-canvas bigger.
-    plt.figure(figsize=(15, 5))
+    # plt.figure(figsize=(15, 5))
 
-    # Plot and compare the two signals.
-    plt.plot(signal_true, label='true')
-    plt.plot(signal_pred, label='pred')
+    signal_true = Series([ind[1] for ind in signal_true], index=list(range(len(signal_true))))
+
+    index_list_y_data = list(range(len(y_data)))
+    index_list_y_data_minus_signal_true = list(range(len(y_data)-len(signal_true), len(y_data)))
+    index_list_y_data_minus_signal_pred = list(range(len(y_data) - len(signal_pred), len(y_data)))
+
+    plt.plot(index_list_y_data, y_data)
+    plt.plot(index_list_y_data_minus_signal_true, signal_true)
+    plt.plot(index_list_y_data_minus_signal_pred, signal_pred)
+    # plt.plot(l, label='true')
+    # plt.plot(signal_pred, label='pred')
 
     # Plot grey box for warmup-period.
     plt.axvspan(0, warmup_steps, facecolor='black', alpha=0.15)
@@ -211,12 +209,12 @@ def plot_comparison(start_idx, target_names, length=100, train=True):
     rmse = sqrt(mean_squared_error(y_pred_rescaled, y_true))
     print('Test RMSE: %.3f' % rmse)
     # Plot labels etc.
-    plt.ylabel(target_names)
-    plt.xlabel('Time units')
-    plt.legend()
-    plt.title(target_names)
+    # plt.ylabel(target_names)
+    # plt.xlabel('Time units')
+    # plt.legend()
+    # plt.title(target_names)
     plt.show()
 
 
 warmup_steps = 7
-plot_comparison(start_idx=0, target_names=col_to_predict, length=prediction_length, train=True)
+plot_comparison(target_names=col_to_predict, length=prediction_length)

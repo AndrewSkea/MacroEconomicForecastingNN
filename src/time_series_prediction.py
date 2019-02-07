@@ -22,6 +22,7 @@ optimizer = str(os.environ.get('OPTIMIZER'))
 num_epochs = int(os.environ.get('NUM_EPOCHS'))
 batch_size = int(os.environ.get('BATCH_SIZE'))
 LSTM_units = int(os.environ.get('LSTM_UNITS'))
+DISPLAY_INITIAL_GRAPHS = bool(os.environ.get('DISPLAY_INITIAL_GRAPHS'))
 
 
 # convert series to supervised learning
@@ -50,7 +51,7 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 
 
 # load dataset
-dataset = read_csv('../data/uk_data.csv', header=0, index_col=0)
+dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
 values = dataset.values
 # integer encode direction
 print("Input shape: ", values.shape)
@@ -97,7 +98,7 @@ print(train_X.shape, train_y.shape, test_X.shape, test_y.shape)
 
 # design network
 model = Sequential()
-model.add(LSTM(5, input_shape=(train_X.shape[1], train_X.shape[2])))
+model.add(LSTM(5, input_shape=(train_X.shape[1], train_X.shape[2]), dropout=0.1))
 model.add(Dense(1))
 model.compile(loss=loss_function, optimizer=optimizer)
 # fit network
@@ -124,7 +125,7 @@ inv_y = inv_y[:, 0]
 # calculate RMSE
 rmse = sqrt(mean_squared_error(inv_y, inv_yhat))
 print('Test RMSE: %.3f' % rmse)
-pyplot.plot(inv_yhat, label='inv_yhat')
-pyplot.plot(inv_y, label='inv_y')
+pyplot.plot(inv_yhat, label='Prediction')
+pyplot.plot(inv_y, label='True')
 pyplot.legend()
 pyplot.show()
