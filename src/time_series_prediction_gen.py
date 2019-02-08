@@ -1,3 +1,6 @@
+import tf
+from math import random
+import numpy as np
 from math import sqrt
 from numpy import concatenate
 from matplotlib import pyplot
@@ -51,6 +54,11 @@ class LSTMPrediction:
         self.results_with_test_x = None
         self.rmse = None
         self.inv_y = None
+        
+        seed = 0
+        np.random.seed(seed)
+        tf.random.set_random_seed(seed)
+        random.seed(seed)
 
     def validate_file(self):
         # specify the number of lag hours
