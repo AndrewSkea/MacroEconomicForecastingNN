@@ -4,7 +4,6 @@ import random
 from numpy import concatenate
 from matplotlib import pyplot
 from pandas import read_csv
-import os
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
@@ -17,11 +16,11 @@ from tkinter.ttk import *
 
 
 class LSTMPrediction:
-    def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.8,
-                 loss_function='mean_squared_error', optimizer='adam', num_epochs=100, steps_per_epoch=20, batch_size=4,
-                 lstm_activation='relu', lstm_units=50, display_initial_graphs=True,
-                 display_prediction_graph=True,
-                 display_loss_graphs=True):
+    def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.8, hidden_layer_setup=(),
+                 loss_function='mean_squared_error', optimizer='adam', num_epochs=200, steps_per_epoch=20, batch_size=4,
+                 lstm_activation='tanh', lstm_units=20, display_initial_graphs=True, dropout_rate=0,
+                 display_prediction_graph=True, display_loss_graphs=True):
+
         self.dataset = dataset
         self.col_to_predict = col_to_predict
         self.look_back_period = look_back_period
@@ -31,8 +30,10 @@ class LSTMPrediction:
         self.num_epochs = num_epochs
         self.steps_per_epoch = steps_per_epoch
         self.batch_size = batch_size
-        self.LSTM_activation = lstm_activation
-        self.LSTM_units = lstm_units
+        self.lstm_activation = lstm_activation
+        self.dropout_rate = dropout_rate
+        self.lstm_units = lstm_units
+        self.hidden_layer_setup = hidden_layer_setup
         self.display_initial_graphs = display_initial_graphs
         self.display_prediction_graph = display_prediction_graph
         self.display_loss_graphs = display_loss_graphs
@@ -95,11 +96,17 @@ class LSTMPrediction:
 
     def create_network(self):
         layers = [
-            LSTM(100, activation=self.lstm_activation, input_shape=(self.look_back_period, self.train_X.shape[1])),
-            Dropout(0.1),
-            Dense(10, activation='relu'),
-            Dense(1, activation='relu')
+            LSTM(self.lstm_units, activation=self.lstm_activation,
+                 input_shape=(self.look_back_period, self.train_X.shape[1]))
         ]
+
+        if self.dropout_rate > 0:
+            layers.append(Dropout(self.dropout_rate))
+
+        for num in self.hidden_layer_setup:
+            layers.append(Dense(num))
+
+        layers.append(Dense(1, activation='relu'))
 
         self.model = Sequential(layers)
 
@@ -167,7 +174,7 @@ class LSTMPrediction:
         pyplot.plot(pred_x_values, self.results_with_test_x, label='Prediction')
 
         pyplot.xlabel("Time units (months)")
-        pyplot.ylabel(self.dataset.keys()[0])
+        pyplot.ylabel(self.col_to_predict)
         pyplot.title("{} prediction vs real data".format(self.col_to_predict))
         pyplot.legend()
         pyplot.show()
@@ -204,7 +211,7 @@ def get_column_to_predict(dataset_keys):
         window.destroy()
         print(column_to_predict)
 
-    btn = Button(window, text="Click Me", command=clicked)
+    btn = Button(window, text="Choose", command=clicked)
     for i in range(len(rad_array)):
         rad_array[i].grid(column=0, row=i)
 
@@ -217,7 +224,9 @@ if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
     input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
-    get_column_to_predict(list(input_dataset.keys()))
+    dataset_keys = list(input_dataset.keys())
+    dataset_keys.remove('Month')
+    get_column_to_predict(dataset_keys)
     print("Column to predict: ", column_to_predict)
     final_result = LSTMPrediction(
         dataset=input_dataset,
