@@ -1,7 +1,6 @@
-import tf
-from math import random
-import numpy as np
 from math import sqrt
+import numpy as np
+import random
 from numpy import concatenate
 from matplotlib import pyplot
 from pandas import read_csv
@@ -13,16 +12,18 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout
 from keras.preprocessing.sequence import TimeseriesGenerator
 from keras.layers import LSTM
+from tkinter import *
+from tkinter.ttk import *
 
 
 class LSTMPrediction:
-    def __init__(self, dataset, col_to_predict, cols_to_use_for_prediction, look_back_period=3, training_split=0.8,
-                 loss_function='mean_squared_error', optimizer='adam', num_epochs=200, steps_per_epoch=20, batch_size=4,
-                 lstm_activation='tanh', lstm_units=50, display_initial_graphs=True, display_prediction_graph=True,
+    def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.8,
+                 loss_function='mean_squared_error', optimizer='adam', num_epochs=100, steps_per_epoch=20, batch_size=4,
+                 lstm_activation='relu', lstm_units=50, display_initial_graphs=True,
+                 display_prediction_graph=True,
                  display_loss_graphs=True):
         self.dataset = dataset
         self.col_to_predict = col_to_predict
-        self.cols_to_use_for_prediction = cols_to_use_for_prediction
         self.look_back_period = look_back_period
         self.training_split = training_split
         self.loss_function = loss_function
@@ -54,14 +55,17 @@ class LSTMPrediction:
         self.results_with_test_x = None
         self.rmse = None
         self.inv_y = None
-        
-        seed = 0
+
+        seed = 50
         np.random.seed(seed)
-        tf.random.set_random_seed(seed)
         random.seed(seed)
 
     def validate_file(self):
         # specify the number of lag hours
+        column_list = list(self.dataset.keys())
+        column_list.insert(0, column_list.pop(column_list.index(self.col_to_predict)))
+        self.dataset = self.dataset.ix[:, column_list]
+
         self.values = self.dataset.values
         self.number_features = self.values.shape[1]
         encoder = LabelEncoder()
@@ -93,6 +97,7 @@ class LSTMPrediction:
         layers = [
             LSTM(100, activation=self.lstm_activation, input_shape=(self.look_back_period, self.train_X.shape[1])),
             Dropout(0.1),
+            Dense(10, activation='relu'),
             Dense(1, activation='relu')
         ]
 
@@ -117,8 +122,8 @@ class LSTMPrediction:
         print('Test RMSE minmax scaled: %.3f' % self.scaled_rmse)
 
         # invert scaling for forecast
-        self.results_with_test_x = concatenate((self.results, self.test_X[-len(self.results):, -self.number_features + 1:]),
-                                               axis=1)
+        self.results_with_test_x = concatenate(
+            (self.results, self.test_X[-len(self.results):, -self.number_features + 1:]), axis=1)
         self.results_with_test_x = self.scaler.inverse_transform(self.results_with_test_x)
         self.results_with_test_x = self.results_with_test_x[:, 0]
 
@@ -135,7 +140,6 @@ class LSTMPrediction:
     def plot_initial_graphs(self):
         groups = [j for j in range(0, self.number_features)]
         i = 1
-        # plot each column
         pyplot.figure()
         for group in groups:
             pyplot.subplot(len(groups), 1, i)
@@ -154,11 +158,17 @@ class LSTMPrediction:
         pyplot.show()
 
     def plot_prediction(self):
-        pyplot.plot(self.results_with_test_x, label='Prediction')
-        pyplot.plot(self.inv_y, label='True')
+        num_pred = len(self.dataset[self.col_to_predict].values) - len(self.results_with_test_x)
+        full_x_values = list(range(len(self.dataset[self.col_to_predict].values)))
+
+        pred_x_values = list(range(num_pred, len(self.dataset[self.col_to_predict].values)))
+
+        pyplot.plot(full_x_values, self.dataset[self.col_to_predict].values, label='True')
+        pyplot.plot(pred_x_values, self.results_with_test_x, label='Prediction')
+
         pyplot.xlabel("Time units (months)")
         pyplot.ylabel(self.dataset.keys()[0])
-        pyplot.title("{} prediction vs real data".format(self.dataset.keys()[0]))
+        pyplot.title("{} prediction vs real data".format(self.col_to_predict))
         pyplot.legend()
         pyplot.show()
 
@@ -179,21 +189,41 @@ class LSTMPrediction:
         return self.rmse
 
 
-final_result = LSTMPrediction(
-    dataset=read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0),
-    col_to_predict=int(os.environ.get('COLUMN_TO_PREDICT')),
-    cols_to_use_for_prediction=[int(x) for x in os.environ.get('COLUMNS_FOR_PREDICTION').split(',')],
-    look_back_period=int(os.environ.get('LOOK_BACK_PERIOD')),
-    training_split=float(os.environ.get('TRAINING_SPLIT')),
-    loss_function=str(os.environ.get('LOSS_FUNCTION')),
-    optimizer=str(os.environ.get('OPTIMIZER')),
-    num_epochs=int(os.environ.get('NUM_EPOCHS')),
-    steps_per_epoch=int(os.environ.get('STEPS_PER_EPOCH')),
-    batch_size=int(os.environ.get('BATCH_SIZE')),
-    lstm_activation=str(os.environ.get('LSTM_ACTIVATION')),
-    lstm_units=int(os.environ.get('LSTM_UNITS')),
-    display_initial_graphs=False,
-    display_loss_graphs=False,
-    display_prediction_graph=True
-).start_prediction()
-print(final_result)
+def get_column_to_predict(dataset_keys):
+    window = Tk()
+    window.title("Please choose column to predict")
+
+    selected = StringVar()
+    rad_array = []
+    for col in dataset_keys:
+        rad_array.append(Radiobutton(window, text=col, value=col, variable=selected))
+
+    def clicked():
+        global column_to_predict
+        column_to_predict = selected.get()
+        window.destroy()
+        print(column_to_predict)
+
+    btn = Button(window, text="Click Me", command=clicked)
+    for i in range(len(rad_array)):
+        rad_array[i].grid(column=0, row=i)
+
+    btn.grid(column=1, row=len(rad_array))
+    window.mainloop()
+    return column_to_predict
+
+
+if __name__ == "__main__":
+    global column_to_predict
+    column_to_predict = 0
+    input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+    get_column_to_predict(list(input_dataset.keys()))
+    print("Column to predict: ", column_to_predict)
+    final_result = LSTMPrediction(
+        dataset=input_dataset,
+        col_to_predict=column_to_predict,
+        display_initial_graphs=False,
+        display_loss_graphs=False,
+        display_prediction_graph=True
+    ).start_prediction()
+    print(final_result)
