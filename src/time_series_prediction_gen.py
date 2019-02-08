@@ -115,8 +115,8 @@ class LSTMPrediction:
         self.results_with_test_x = self.results_with_test_x[:, 0]
 
         # invert scaling for actual
-        test_y = self.test_y.reshape((len(self.test_y), 1))
-        self.inv_y = concatenate((test_y, self.test_X[:, -self.number_features + 1:]), axis=1)
+        self.test_y = self.test_y.reshape((len(self.test_y), 1))
+        self.inv_y = concatenate((self.test_y, self.test_X[:, -self.number_features + 1:]), axis=1)
         self.inv_y = self.scaler.inverse_transform(self.inv_y)
         self.inv_y = self.inv_y[-len(self.results):, 0]
 
