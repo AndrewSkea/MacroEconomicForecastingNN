@@ -19,12 +19,13 @@ class LSTMPrediction:
     def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.8, hidden_layer_setup=(),
                  loss_function='mean_squared_error', optimizer='adam', num_epochs=200, steps_per_epoch=20, batch_size=4,
                  lstm_activation='tanh', lstm_units=20, display_initial_graphs=True, dropout_rate=0,
-                 display_prediction_graph=True, display_loss_graphs=True):
+                 display_prediction_graph=True, display_loss_graphs=True, validation_split=0.1):
 
         self.dataset = dataset
         self.col_to_predict = col_to_predict
         self.look_back_period = look_back_period
         self.training_split = training_split
+        self.validation_split = validation_split
         self.loss_function = loss_function
         self.optimizer = optimizer
         self.num_epochs = num_epochs
@@ -45,15 +46,20 @@ class LSTMPrediction:
         self.train_y = None
         self.test_X = None
         self.test_y = None
+        self.validate_X = None
+        self.validate_y = None
         self.generator = None
+        self.validate_generator = None
         self.lstm_activation = None
         self.model = None
         self.history = None
         self.test_generator = None
         self.results = None
+        self.validation_results = None
         self.scaler = None
         self.scaled_rmse = None
         self.results_with_test_x = None
+        self.results_with_validation = None
         self.rmse = None
         self.inv_y = None
 
@@ -78,21 +84,30 @@ class LSTMPrediction:
         self.values = self.scaler.fit_transform(self.values)
 
     def split_train_test(self):
-        n_train_points = int(self.training_split * self.values.shape[0])
+        train_test = int(self.values.shape[0] * (1 - self.validation_split))
+        n_train_points = int(self.training_split * train_test)
         train = self.values[:n_train_points, :]
-        test = self.values[n_train_points:, :]
+        test = self.values[n_train_points:train_test, :]
+        validation = self.values[train_test:, :]
 
         # split into input and outputs
         n_obs = self.look_back_period * self.number_features
         self.train_X, self.train_y = train[:, :n_obs], train[:, -self.number_features]
         self.test_X, self.test_y = test[:, :n_obs], test[:, -self.number_features]
+        self.validate_X, self.validate_y = validation[:, :n_obs], validation[:, -self.number_features]
         print("Total number of rows: {}\nRows used for Training: {}\nRows used for testing: {}\n"
-              "Number of variables used: {} ".format(self.values.shape[0], self.train_X.shape[0],
-                                                     self.test_X.shape[0], self.train_X.shape[1]))
+              "Rows for out-of-sample validation: {}\nNumber of variables used: {}".format(
+            self.values.shape[0], self.train_X.shape[0], self.test_X.shape[0], self.validate_X.shape[0],
+            self.train_X.shape[1])
+        )
 
     def create_train_generator(self):
         self.generator = TimeseriesGenerator(self.train_X, self.train_y, self.look_back_period,
                                              batch_size=self.batch_size)
+
+    def create_test_generator(self):
+        self.test_generator = TimeseriesGenerator(self.test_X, self.test_y, self.look_back_period,
+                                                  batch_size=self.batch_size)
 
     def create_network(self):
         layers = [
@@ -112,16 +127,18 @@ class LSTMPrediction:
 
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         self.history = self.model.fit_generator(generator=self.generator, epochs=self.num_epochs, verbose=2,
-                                                steps_per_epoch=self.steps_per_epoch)
+                                                shuffle=False, validation_data=self.test_generator)
 
-    def create_test_generator(self):
-        self.test_generator = TimeseriesGenerator(self.test_X, self.test_y, self.look_back_period,
-                                                  batch_size=self.batch_size)
-
+    def get_results_test_generator(self):
         accuracy_results = self.model.evaluate_generator(self.test_generator)
         print("Results: {}".format(accuracy_results))
 
         self.results = self.model.predict_generator(self.test_generator)
+
+    def create_validation_generator(self):
+        self.validate_generator = TimeseriesGenerator(self.validate_X, self.validate_y, self.look_back_period,
+                                                      batch_size=self.batch_size)
+        self.validation_results = self.model.predict_generator(self.validate_generator)
 
     def get_summary_values(self):
         self.scaled_rmse = sqrt(
@@ -133,6 +150,12 @@ class LSTMPrediction:
             (self.results, self.test_X[-len(self.results):, -self.number_features + 1:]), axis=1)
         self.results_with_test_x = self.scaler.inverse_transform(self.results_with_test_x)
         self.results_with_test_x = self.results_with_test_x[:, 0]
+
+        # invert scaling for validation
+        self.results_with_validation = concatenate(
+            (self.validation_results, self.validate_X[-len(self.validation_results):, -self.number_features + 1:]), axis=1)
+        self.results_with_validation = self.scaler.inverse_transform(self.results_with_validation)
+        self.results_with_validation = self.results_with_validation[:, 0]
 
         # invert scaling for actual
         self.test_y = self.test_y.reshape((len(self.test_y), 1))
@@ -158,20 +181,22 @@ class LSTMPrediction:
     def plot_loss_values(self):
         pyplot.plot(self.history.history['loss'])
         pyplot.plot(self.history.history['val_loss'])
-        pyplot.title('model accuracy')
-        pyplot.ylabel('accuracy')
+        pyplot.title('model loss vs validation_loss')
+        pyplot.ylabel('loss')
         pyplot.xlabel('epoch')
         pyplot.legend(['train', 'test'], loc='upper left')
         pyplot.show()
 
     def plot_prediction(self):
-        num_pred = len(self.dataset[self.col_to_predict].values) - len(self.results_with_test_x)
-        full_x_values = list(range(len(self.dataset[self.col_to_predict].values)))
-
-        pred_x_values = list(range(num_pred, len(self.dataset[self.col_to_predict].values)))
+        series = self.dataset[self.col_to_predict].values
+        full_x_values = list(range(len(series)))
+        pred_x_values = list(
+            range(self.train_X.shape[0] + self.look_back_period, self.train_X.shape[0] + self.test_X.shape[0]))
+        validation_pred_x_values = list(range(int(len(series) - len(self.results_with_validation)), len(series)))
 
         pyplot.plot(full_x_values, self.dataset[self.col_to_predict].values, label='True')
-        pyplot.plot(pred_x_values, self.results_with_test_x, label='Prediction')
+        pyplot.plot(pred_x_values, self.results_with_test_x, label='Test prediction')
+        pyplot.plot(validation_pred_x_values, self.results_with_validation, label='Out of sample prediction')
 
         pyplot.xlabel("Time units (months)")
         pyplot.ylabel(self.col_to_predict)
@@ -186,11 +211,13 @@ class LSTMPrediction:
         self.scale_dataset()
         self.split_train_test()
         self.create_train_generator()
-        self.create_network()
         self.create_test_generator()
-        self.get_summary_values()
+        self.create_network()
         if self.display_loss_graphs:
             self.plot_loss_values()
+        self.get_results_test_generator()
+        self.create_validation_generator()
+        self.get_summary_values()
         if self.display_prediction_graph:
             self.plot_prediction()
         return self.rmse
@@ -232,7 +259,7 @@ if __name__ == "__main__":
         dataset=input_dataset,
         col_to_predict=column_to_predict,
         display_initial_graphs=False,
-        display_loss_graphs=False,
+        display_loss_graphs=True,
         display_prediction_graph=True
     ).start_prediction()
     print(final_result)
