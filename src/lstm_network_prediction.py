@@ -16,9 +16,9 @@ from tkinter.ttk import *
 
 
 class LSTMPrediction:
-    def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.8, hidden_layer_setup=(),
-                 loss_function='mean_squared_error', optimizer='adam', num_epochs=200, steps_per_epoch=20, batch_size=4,
-                 lstm_activation='tanh', lstm_units=20, display_initial_graphs=True, dropout_rate=0,
+    def __init__(self, dataset, col_to_predict, look_back_period=3, training_split=0.85, hidden_layer_setup=(64,),
+                 loss_function='mean_squared_error', optimizer='adam', num_epochs=50, steps_per_epoch=20, batch_size=4,
+                 lstm_activation='tanh', lstm_units=64, display_initial_graphs=True, dropout_rate=0.1,
                  display_prediction_graph=True, display_loss_graphs=True, validation_split=0.1):
 
         self.dataset = dataset
@@ -54,7 +54,7 @@ class LSTMPrediction:
         self.model = None
         self.history = None
         self.test_generator = None
-        self.results = None
+        self.test_results = None
         self.validation_results = None
         self.scaler = None
         self.scaled_rmse = None
@@ -63,7 +63,7 @@ class LSTMPrediction:
         self.rmse = None
         self.inv_y = None
 
-        seed = 50
+        seed = 10
         np.random.seed(seed)
         random.seed(seed)
 
@@ -109,51 +109,62 @@ class LSTMPrediction:
         self.test_generator = TimeseriesGenerator(self.test_X, self.test_y, self.look_back_period,
                                                   batch_size=self.batch_size)
 
+    def create_validation_generator(self):
+        self.validate_generator = TimeseriesGenerator(self.validate_X, self.validate_y, self.look_back_period,
+                                                      batch_size=self.batch_size)
+
     def create_network(self):
         layers = [
-            LSTM(self.lstm_units, activation=self.lstm_activation,
-                 input_shape=(self.look_back_period, self.train_X.shape[1]))
+            LSTM(self.lstm_units, activation=self.lstm_activation, go_backwards=True,
+                 input_shape=(self.look_back_period, self.train_X.shape[1]), return_sequences=True),
         ]
 
         if self.dropout_rate > 0:
             layers.append(Dropout(self.dropout_rate))
 
         for num in self.hidden_layer_setup:
-            layers.append(Dense(num))
+            layers.append(LSTM(num, return_sequences=True))
 
-        layers.append(Dense(1, activation='relu'))
+        layers.append(LSTM(1, return_sequences=False))
 
         self.model = Sequential(layers)
 
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         self.history = self.model.fit_generator(generator=self.generator, epochs=self.num_epochs, verbose=2,
-                                                shuffle=False, validation_data=self.test_generator)
+                                                shuffle=False, validation_data=self.test_generator,
+                                                steps_per_epoch=self.steps_per_epoch)
 
     def get_results_test_generator(self):
+        self.model.reset_states()
         accuracy_results = self.model.evaluate_generator(self.test_generator)
-        print("Results: {}".format(accuracy_results))
+        print("Test results: {}".format(accuracy_results))
+        self.test_results = self.model.predict_generator(self.test_generator)
 
-        self.results = self.model.predict_generator(self.test_generator)
-
-    def create_validation_generator(self):
-        self.validate_generator = TimeseriesGenerator(self.validate_X, self.validate_y, self.look_back_period,
-                                                      batch_size=self.batch_size)
+    def get_results_validation_generator(self):
+        self.model.reset_states()
+        accuracy_results = self.model.evaluate_generator(self.validate_generator)
+        print("Validation results: {}".format(accuracy_results))
         self.validation_results = self.model.predict_generator(self.validate_generator)
 
     def get_summary_values(self):
         self.scaled_rmse = sqrt(
-            mean_squared_error(self.results, self.test_y.reshape((len(self.test_y), 1))[-len(self.results):]))
-        print('Test RMSE minmax scaled: %.3f' % self.scaled_rmse)
+            mean_squared_error(self.test_results, self.test_y.reshape((len(self.test_y), 1))[-len(self.test_results):]))
+        print('Test RMSE minmax: %.3f' % self.scaled_rmse)
+
+        scaled_rmse_val = sqrt(
+            mean_squared_error(self.validation_results, self.test_y.reshape((len(self.test_y), 1))[-len(self.validation_results):]))
+        print('Validation RMSE minmax: %.3f' % scaled_rmse_val)
 
         # invert scaling for forecast
         self.results_with_test_x = concatenate(
-            (self.results, self.test_X[-len(self.results):, -self.number_features + 1:]), axis=1)
+            (self.test_results, self.test_X[:len(self.test_results), -self.number_features + 1:]), axis=1)
         self.results_with_test_x = self.scaler.inverse_transform(self.results_with_test_x)
         self.results_with_test_x = self.results_with_test_x[:, 0]
 
         # invert scaling for validation
         self.results_with_validation = concatenate(
-            (self.validation_results, self.validate_X[-len(self.validation_results):, -self.number_features + 1:]), axis=1)
+            (self.validation_results, self.test_X[:len(self.validation_results), -self.number_features + 1:]),
+            axis=1)
         self.results_with_validation = self.scaler.inverse_transform(self.results_with_validation)
         self.results_with_validation = self.results_with_validation[:, 0]
 
@@ -161,11 +172,7 @@ class LSTMPrediction:
         self.test_y = self.test_y.reshape((len(self.test_y), 1))
         self.inv_y = concatenate((self.test_y, self.test_X[:, -self.number_features + 1:]), axis=1)
         self.inv_y = self.scaler.inverse_transform(self.inv_y)
-        self.inv_y = self.inv_y[-len(self.results):, 0]
-
-        # calculate RMSE
-        self.rmse = sqrt(mean_squared_error(self.inv_y, self.results_with_test_x))
-        print('Test RMSE original scale: %.3f' % self.rmse)
+        self.inv_y = self.inv_y[-len(self.test_results):, 0]
 
     def plot_initial_graphs(self):
         groups = [j for j in range(0, self.number_features)]
@@ -212,11 +219,12 @@ class LSTMPrediction:
         self.split_train_test()
         self.create_train_generator()
         self.create_test_generator()
+        self.create_validation_generator()
         self.create_network()
         if self.display_loss_graphs:
             self.plot_loss_values()
         self.get_results_test_generator()
-        self.create_validation_generator()
+        self.get_results_validation_generator()
         self.get_summary_values()
         if self.display_prediction_graph:
             self.plot_prediction()
@@ -250,9 +258,9 @@ def get_column_to_predict(dataset_keys):
 if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
-    input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+    input_dataset = read_csv('../data/full_data_1987_onwards.csv', header=0, index_col=0)
     dataset_keys = list(input_dataset.keys())
-    dataset_keys.remove('Month')
+    # dataset_keys.remove('Month')
     get_column_to_predict(dataset_keys)
     print("Column to predict: ", column_to_predict)
     final_result = LSTMPrediction(

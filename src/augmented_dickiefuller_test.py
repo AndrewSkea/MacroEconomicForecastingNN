@@ -55,7 +55,7 @@ def get_column_to_predict(dataset_keys):
 if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
-    input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+    input_dataset = read_csv('../data/full_data_1987_onwards.csv', header=0, index_col=0)
     dataset_key_list = list(input_dataset.keys())
     dataset_key_list.remove('Month')
     get_column_to_predict(dataset_key_list)
