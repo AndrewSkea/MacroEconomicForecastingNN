@@ -98,6 +98,7 @@ class LSTMPredict:
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         # fit network
         start, updating_t = time.time(), time.time()
+        print("Starting training")
         for i in range(self.num_epochs):
             self.model.fit(X, y, epochs=1, batch_size=self.batch_size, verbose=0, shuffle=False)
             self.model.reset_states()
@@ -175,14 +176,14 @@ class LSTMPredict:
         self.plot_forecasts(forecasts=forecasts)
 
 
-data = read_csv('../data/full_data_1989_onwards_large_cols.csv', header=0, index_col=0)
+data = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
 
 LSTMPredict(
     dataset=data,
-    col_to_predict='GDP',
-    look_back_period=15,
-    num_forecasts=5,
+    col_to_predict='Unemployed',
+    look_back_period=10,
+    num_forecasts=10,
     training_split=0.8,
-    lstm_units=12,
-    num_epochs=25
+    lstm_units=8,
+    num_epochs=20
 ).start()
