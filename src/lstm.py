@@ -12,20 +12,24 @@ import os.path
 from keras.models import load_model
 import random
 import time
+import matplotlib.dates as mdates
+from augmented_dickiefuller_test import ADFullerTest
 
 
 class LSTMPredict:
-    def __init__(self, dataset, col_to_predict, look_back_period=3, num_forecasts=5, training_split=0.85, lstm_units=16,
-                 loss_function='mean_squared_error', optimizer='adam', num_epochs=50, batch_size=1,
+    def __init__(self, dataset, col_to_predict, look_back_period=15, num_forecasts=8, training_split=0.85, lstm_units=16,
+                 loss_function='mean_squared_error', optimizer='sgd', num_epochs=50, batch_size=1, stationary=False,
                  lstm_activation=None, dropout_rate=0.1, display_prediction_graph=True, save_model=True,
                  file_path='../results/my_model.h5', load_model_from_file=False):
 
+        self.dataset_copy = dataset
         self.dataset = dataset
         self.original_dataset = dataset
         self.reframed = None
         self.train = None
         self.test = None
         self.model = None
+        self.stationary = stationary
         self.col_to_predict = col_to_predict
         self.look_back_period = look_back_period
         self.num_forecasts = num_forecasts
@@ -41,15 +45,27 @@ class LSTMPredict:
         self.save_model = save_model
         self.load_model_file = load_model_from_file
         self.file_path = file_path
-        seed = 10
+        seed = 5000
         np.random.seed(seed)
         random.seed(seed)
 
     def organise_dataset(self):
+        adfuller_class = ADFullerTest(self.dataset[self.col_to_predict])
+        if self.stationary:
+            self.dataset = self.dataset.diff()
+            # is_stationary = adfuller_class.adfuller_test()
+            # print("Is stationary: ", is_stationary)
+            # while is_stationary is False:
+            #     self.dataset = self.dataset.diff()
+            #     # self.dataset.to_csv('../data/hello.csv')
+            #     self.dataset.dropna(inplace=True)
+            #     adfuller_class.series = self.dataset[self.col_to_predict]
+            #     is_stationary = adfuller_class.adfuller_test()
+            #     print("Is stationary: ", is_stationary)
         self.original_dataset = self.dataset
         self.dataset = self.dataset.iloc[0:]
-        self.dataset = (self.dataset - self.dataset.mean()) / self.dataset.std()
-        self.original_dataset = (self.original_dataset - self.original_dataset.mean()) / self.original_dataset.std()
+        # self.dataset = (self.dataset - self.dataset.mean()) / self.dataset.std()
+        # self.original_dataset = (self.original_dataset - self.original_dataset.mean()) / self.original_dataset.std()
 
         cols = self.dataset.columns.tolist()
         cols.remove(self.col_to_predict)
@@ -92,15 +108,14 @@ class LSTMPredict:
 
         # design network
         self.model = Sequential()
-        self.model.add(LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]),
-                            stateful=True))
+        self.model.add(LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]), stateful=True))
         self.model.add(Dense(self.num_forecasts))
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         # fit network
         start, updating_t = time.time(), time.time()
         print("Starting training")
         for i in range(self.num_epochs):
-            self.model.fit(X, y, epochs=1, batch_size=self.batch_size, verbose=0, shuffle=False)
+            self.model.fit(X, y, epochs=1, batch_size=self.batch_size, verbose=0, shuffle=False, validation_split=len(self.test)/len(self.train))
             self.model.reset_states()
             print("Epoch {}/{} - {}s".format(i, self.num_epochs, round(time.time() - updating_t, 2)))
             updating_t = time.time()
@@ -135,22 +150,45 @@ class LSTMPredict:
     # plot the forecasts in the context of the original dataset, multiple segments
     def plot_forecasts(self, forecasts, linestyle=None):
         # plot the entire dataset in blue
-        series = self.original_dataset[self.col_to_predict].values
+        pyplot.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        pyplot.gca().xaxis.set_major_locator(mdates.YearLocator())
+        x_labels = [str(dt._date_repr) for dt in list(self.dataset_copy.index)]
+        if self.stationary:
+            series = self.dataset_copy[self.col_to_predict].values
+        else:
+            series = self.original_dataset[self.col_to_predict].values
         n_test = self.test.shape[0] + self.num_forecasts - 1
         pyplot.figure()
         if linestyle is None:
-            pyplot.plot(series, label='observed')
+            pyplot.plot(x_labels, series, label='observed')
         else:
-            pyplot.plot(series, linestyle, label='observed')
+            pyplot.plot(x_labels, series, linestyle, label='observed')
         pyplot.legend(loc='upper right')
         # plot the forecasts in red
         for i in range(len(forecasts)):
-            if i % self.num_forecasts == 0:
-                off_s = len(series) - n_test + 2 + i - 1
+            if i % 4 == 0:
+                off_s = len(series) - n_test + i + 1
                 off_e = off_s + len(forecasts[i]) + 1
-                xaxis = [x for x in range(off_s, off_e)]
-                yaxis = [series[off_s]] + forecasts[i]
-                pyplot.plot(xaxis, yaxis, 'r')
+                xaxis = x_labels[off_s: off_e]
+                lack_of_data = len(forecasts[i]) - len(xaxis)
+                if lack_of_data > 0:
+                    for l in range(lack_of_data+1):
+                        xaxis.append("t+{}".format(l))
+
+                if self.stationary:
+                    original_forecast_scale = [series[off_s]]
+                    for k in range(len(forecasts[i])):
+                        original_forecast_scale.append(original_forecast_scale[-1] + forecasts[i][k])
+                    yaxis = original_forecast_scale
+                    pyplot.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
+                else:
+                    yaxis = [series[off_s]] + forecasts[i]
+                    pyplot.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
+        pyplot.xlabel("Date")
+        pyplot.ylabel(self.col_to_predict)
+        pyplot.legend(loc='upper right')
+        pyplot.tick_params(which='major')
+        pyplot.gcf().autofmt_xdate()
         pyplot.show()
 
     def start(self):
@@ -176,14 +214,15 @@ class LSTMPredict:
         self.plot_forecasts(forecasts=forecasts)
 
 
-data = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], keep_date_col=True)
 
 LSTMPredict(
     dataset=data,
-    col_to_predict='Unemployed',
-    look_back_period=10,
-    num_forecasts=10,
-    training_split=0.8,
-    lstm_units=8,
-    num_epochs=20
+    col_to_predict='RPI',
+    look_back_period=12,
+    num_forecasts=8,
+    training_split=0.85,
+    lstm_units=32,
+    num_epochs=15,
+    stationary=True
 ).start()
