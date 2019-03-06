@@ -75,8 +75,6 @@ class LSTMPrediction:
 
         self.values = self.dataset.values
         self.number_features = self.values.shape[1]
-        encoder = LabelEncoder()
-        self.values[:, 4] = encoder.fit_transform(self.values[:, 4])
         self.values = self.values.astype('float32')
 
     def scale_dataset(self):
@@ -258,7 +256,7 @@ def get_column_to_predict(dataset_keys):
 if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
-    input_dataset = read_csv('../data/full_data_1987_onwards.csv', header=0, index_col=0)
+    input_dataset = read_csv('../data/final_data.csv', header=0, index_col=0)
     dataset_keys = list(input_dataset.keys())
     # dataset_keys.remove('Month')
     get_column_to_predict(dataset_keys)

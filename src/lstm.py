@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import pyplot
 from pandas import read_csv
 from pandas import DataFrame
+import pandas
 from pandas import concat
 from sklearn.metrics import mean_squared_error
 from keras.models import Sequential
@@ -12,14 +13,13 @@ import os.path
 from keras.models import load_model
 import random
 import time
-import matplotlib.dates as mdates
-from augmented_dickiefuller_test import ADFullerTest
+from dateutil.relativedelta import relativedelta
 
 
 class LSTMPredict:
     def __init__(self, dataset, col_to_predict, look_back_period=15, num_forecasts=8, training_split=0.85, lstm_units=16,
                  loss_function='mean_squared_error', optimizer='sgd', num_epochs=50, batch_size=1, stationary=False,
-                 lstm_activation=None, dropout_rate=0.1, display_prediction_graph=True, save_model=True,
+                 lstm_activation=None, dropout_rate=0.2, display_prediction_graph=True, save_model=True,
                  file_path='../results/my_model.h5', load_model_from_file=False):
 
         self.dataset_copy = dataset
@@ -50,22 +50,10 @@ class LSTMPredict:
         random.seed(seed)
 
     def organise_dataset(self):
-        adfuller_class = ADFullerTest(self.dataset[self.col_to_predict])
         if self.stationary:
             self.dataset = self.dataset.diff()
-            # is_stationary = adfuller_class.adfuller_test()
-            # print("Is stationary: ", is_stationary)
-            # while is_stationary is False:
-            #     self.dataset = self.dataset.diff()
-            #     # self.dataset.to_csv('../data/hello.csv')
-            #     self.dataset.dropna(inplace=True)
-            #     adfuller_class.series = self.dataset[self.col_to_predict]
-            #     is_stationary = adfuller_class.adfuller_test()
-            #     print("Is stationary: ", is_stationary)
         self.original_dataset = self.dataset
         self.dataset = self.dataset.iloc[0:]
-        # self.dataset = (self.dataset - self.dataset.mean()) / self.dataset.std()
-        # self.original_dataset = (self.original_dataset - self.original_dataset.mean()) / self.original_dataset.std()
 
         cols = self.dataset.columns.tolist()
         cols.remove(self.col_to_predict)
@@ -109,6 +97,7 @@ class LSTMPredict:
         # design network
         self.model = Sequential()
         self.model.add(LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]), stateful=True))
+        # self.model.add(Dropout(self.dropout_rate))
         self.model.add(Dense(self.num_forecasts))
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         # fit network
@@ -148,47 +137,45 @@ class LSTMPredict:
             print('t+%d RMSE: %f' % ((i + 1), rmse))
 
     # plot the forecasts in the context of the original dataset, multiple segments
-    def plot_forecasts(self, forecasts, linestyle=None):
+    def plot_forecasts(self, forecasts):
+        # Create the figure
+        fig = pyplot.figure()
+        ax1 = fig.add_subplot(111)
+
         # plot the entire dataset in blue
-        pyplot.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-        pyplot.gca().xaxis.set_major_locator(mdates.YearLocator())
-        x_labels = [str(dt._date_repr) for dt in list(self.dataset_copy.index)]
+        x_labels = self.dataset_copy.index
         if self.stationary:
             series = self.dataset_copy[self.col_to_predict].values
         else:
             series = self.original_dataset[self.col_to_predict].values
         n_test = self.test.shape[0] + self.num_forecasts - 1
-        pyplot.figure()
-        if linestyle is None:
-            pyplot.plot(x_labels, series, label='observed')
-        else:
-            pyplot.plot(x_labels, series, linestyle, label='observed')
-        pyplot.legend(loc='upper right')
+        data = DataFrame({'values':series}, index=x_labels)
+        ax1.plot('values', data=data)
         # plot the forecasts in red
         for i in range(len(forecasts)):
-            if i % 4 == 0:
+            if i % 4 == 0 or i == len(forecasts):
                 off_s = len(series) - n_test + i + 1
                 off_e = off_s + len(forecasts[i]) + 1
-                xaxis = x_labels[off_s: off_e]
+                xaxis = list(x_labels.values[off_s: off_e])
                 lack_of_data = len(forecasts[i]) - len(xaxis)
-                if lack_of_data > 0:
+                if lack_of_data >= 0:
                     for l in range(lack_of_data+1):
-                        xaxis.append("t+{}".format(l))
+                        next_date = pandas.Timestamp(xaxis[-1]).to_pydatetime() + relativedelta(months=+3)
+                        xaxis.append(np.datetime64(next_date))
 
                 if self.stationary:
                     original_forecast_scale = [series[off_s]]
                     for k in range(len(forecasts[i])):
                         original_forecast_scale.append(original_forecast_scale[-1] + forecasts[i][k])
                     yaxis = original_forecast_scale
-                    pyplot.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
                 else:
                     yaxis = [series[off_s]] + forecasts[i]
-                    pyplot.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
-        pyplot.xlabel("Date")
-        pyplot.ylabel(self.col_to_predict)
-        pyplot.legend(loc='upper right')
-        pyplot.tick_params(which='major')
-        pyplot.gcf().autofmt_xdate()
+                ax1.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
+        ax1.set_xlabel("Date (Quarterly)")
+        ax1.set_ylabel("Change in {} (%)".format(self.col_to_predict))
+        ax1.set_title("{} predictions at certain intervals".format(self.col_to_predict))
+        ax1.legend(loc='upper right')
+        fig.autofmt_xdate()
         pyplot.show()
 
     def start(self):
@@ -213,16 +200,16 @@ class LSTMPredict:
         # plot forecasts
         self.plot_forecasts(forecasts=forecasts)
 
-
-data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], keep_date_col=True)
+mydateparser = lambda x: pandas.datetime.strptime(x, "%d/%m/%Y")
+data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], date_parser=mydateparser, keep_date_col=True)
 
 LSTMPredict(
     dataset=data,
     col_to_predict='RPI',
-    look_back_period=12,
-    num_forecasts=8,
+    look_back_period=15,
+    num_forecasts=2,
     training_split=0.85,
-    lstm_units=32,
-    num_epochs=15,
-    stationary=True
+    lstm_units=12,
+    num_epochs=25,
+    stationary=True  # highly recommended = True
 ).start()
