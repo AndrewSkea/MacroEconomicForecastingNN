@@ -210,13 +210,18 @@ class LSTMPredict:
         self.plot_forecasts(forecasts=forecasts)
 
 mydateparser = lambda x: pandas.datetime.strptime(x, "%d/%m/%Y")
-data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], date_parser=mydateparser, keep_date_col=True)
+data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], date_parser=mydateparser)
+
+col_to_predict = 'RPI'
+cols_to_use = ['GDP', 'Interest', 'Output']
+cols_to_use.append(col_to_predict) if col_to_predict not in cols_to_use else None
+data = data[cols_to_use] if len(cols_to_use) > 0 else data
 
 LSTMPredict(
     dataset=data,
-    col_to_predict='RPI',
+    col_to_predict=col_to_predict,
     look_back_period=12,
-    num_forecasts=8,
+    num_forecasts=1,
     lstm_units=36,
     num_epochs=15,
     stationary=True  # highly recommended = True
