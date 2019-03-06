@@ -97,7 +97,7 @@ class LSTMPredict:
         # design network
         self.model = Sequential()
         self.model.add(LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]), stateful=True))
-        # self.model.add(Dropout(self.dropout_rate))
+        self.model.add(Dropout(self.dropout_rate))
         self.model.add(Dense(self.num_forecasts))
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
         # fit network
@@ -151,26 +151,35 @@ class LSTMPredict:
         n_test = self.test.shape[0] + self.num_forecasts - 1
         data = DataFrame({'values':series}, index=x_labels)
         ax1.plot('values', data=data)
-        # plot the forecasts in red
-        for i in range(len(forecasts)):
-            if i % 4 == 0 or i == len(forecasts):
-                off_s = len(series) - n_test + i + 1
-                off_e = off_s + len(forecasts[i]) + 1
-                xaxis = list(x_labels.values[off_s: off_e])
-                lack_of_data = len(forecasts[i]) - len(xaxis)
-                if lack_of_data >= 0:
-                    for l in range(lack_of_data+1):
-                        next_date = pandas.Timestamp(xaxis[-1]).to_pydatetime() + relativedelta(months=+3)
-                        xaxis.append(np.datetime64(next_date))
 
-                if self.stationary:
-                    original_forecast_scale = [series[off_s]]
-                    for k in range(len(forecasts[i])):
-                        original_forecast_scale.append(original_forecast_scale[-1] + forecasts[i][k])
-                    yaxis = original_forecast_scale
-                else:
-                    yaxis = [series[off_s]] + forecasts[i]
+        for i in range(len(forecasts)):
+            off_s = len(series) - n_test + i# + 1
+            off_e = off_s + len(forecasts[i])# + 1
+            xaxis = list(x_labels.values[off_s: off_e])
+            lack_of_data = len(forecasts[i]) - len(xaxis)
+            if lack_of_data >= 0:
+                for l in range(lack_of_data+1):
+                    next_date = pandas.Timestamp(xaxis[-1]).to_pydatetime() + relativedelta(months=+3)
+                    xaxis.append(np.datetime64(next_date))
+
+            if self.stationary:
+                original_forecast_scale = [series[off_s]]
+                for k in range(len(forecasts[i])):
+                    original_forecast_scale.append(original_forecast_scale[-1] + forecasts[i][k])
+                forecasts[i] = original_forecast_scale[1:]
+                yaxis = original_forecast_scale
+            else:
+                yaxis = [series[off_s]] + forecasts[i]
+            if i % 4 == 0 or i == len(forecasts):
                 ax1.plot(xaxis, yaxis, 'r', label='forecast n{}'.format(i))
+
+        xaxis = list(x_labels.values[len(series) - n_test + len(forecasts[0]):])
+        for l in range(1):
+            next_date = pandas.Timestamp(xaxis[-1]).to_pydatetime() + relativedelta(months=+3)
+            xaxis.append(np.datetime64(next_date))
+        yaxis = [x[-1] for x in forecasts]
+        ax1.plot(xaxis, yaxis, 'g', label='t+{} forecast'.format(self.num_forecasts))
+
         ax1.set_xlabel("Date (Quarterly)")
         ax1.set_ylabel("Change in {} (%)".format(self.col_to_predict))
         ax1.set_title("{} predictions at certain intervals".format(self.col_to_predict))
@@ -206,10 +215,9 @@ data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0]
 LSTMPredict(
     dataset=data,
     col_to_predict='RPI',
-    look_back_period=15,
-    num_forecasts=2,
-    training_split=0.85,
-    lstm_units=12,
-    num_epochs=25,
+    look_back_period=12,
+    num_forecasts=8,
+    lstm_units=36,
+    num_epochs=15,
     stationary=True  # highly recommended = True
 ).start()
