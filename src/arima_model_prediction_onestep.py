@@ -8,7 +8,7 @@ from math import sqrt
 
 
 class ARIMAModel:
-    def __init__(self, series, col_to_predict, train_test_split=0.7, validation_size=0.1, time_lags=3):
+    def __init__(self, series, col_to_predict, train_test_split=0.85, validation_size=0.15, time_lags=5):
         self.series = series
         self.train_test_split = train_test_split
         self.col_to_predict = col_to_predict
@@ -16,53 +16,46 @@ class ARIMAModel:
         self.time_lags = time_lags
         self.train = None
         self.test = None
-        self.validation = None
         self.predictions = list()
-        self.validation_predictions = list()
+        self.test_predictions = list()
         self.history = None
         self.rmse = 0
 
     def split_data(self):
-        validation_length = int(len(self.series) * self.validation_split)
-        train_length = int(self.train_test_split * (len(self.series) - validation_length))
-        self.train = self.series[0:train_length]
-        self.test = self.series[train_length:-validation_length]
-        self.validation = self.series[-validation_length:]
-        print("Total length: {}\nTrain length: {}\nTest total: {}\nValidation length: {}".format(
-            len(self.series), len(self.train), len(self.test), len(self.validation)
+        train_length = int(self.train_test_split * len(self.series))
+        self.train = self.series[0:-36]
+        self.test = self.series[-36:]
+        print("Total length: {}\nTrain length: {}\nTest total: {}".format(
+            len(self.series), len(self.train), len(self.test)
         ))
-        self.history = [x for x in self.train]
 
     def train_and_predict(self):
+        self.history = list(self.train)
+        true_future_values = []
         self.predictions = list()
         test_length = len(self.test)
+
         # walk-forward validation
         for t in range(test_length):
             # fit model
-            model = ARIMA(self.history, order=(self.time_lags, 1, 0))
+            model = ARIMA(self.history, order=(self.time_lags, 2, 1))
             model_fit = model.fit(disp=False)
-            # one step forecast
             yhat = model_fit.forecast()[0]
             # store forecast and ob
             self.predictions.append(yhat)
             self.history.append(self.test[t])
             print("{}/{}".format(t, test_length))
 
-        # for i in range(len(self.validation)):
-        self.validation_predictions = model_fit.forecast(len(self.validation))[0]
+        self.rmse = sqrt(mean_squared_error(self.predictions, self.test))
 
     def summarise(self):
         # evaluate forecasts
-        self.rmse = sqrt(mean_squared_error(self.test, self.predictions))
         print('Test RMSE: %.3f' % self.rmse)
 
         full_x_values = list(range(len(self.series)))
-        pred_x_values = list(range(len(self.train), len(self.train)+len(self.test)))
-        validation_pred_x_values = list(range(int(len(self.series) - len(self.validation)), len(self.series)))
+        pyplot.plot(full_x_values, self.series, label='values')
 
-        pyplot.plot(full_x_values, self.series, label='True')
-        pyplot.plot(pred_x_values, self.predictions, label='Test predictions (one-step ahead)')
-        pyplot.plot(validation_pred_x_values, self.validation_predictions, label='Validation predictions (out-of-sample)')
+        pyplot.plot(full_x_values[-len(self.predictions)-1:-1], self.predictions, 'g', label='t+1 line')
 
         pyplot.xlabel("Time units (months)")
         pyplot.ylabel(self.col_to_predict)
@@ -103,9 +96,9 @@ def get_column_to_predict(dataset_keys):
 if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
-    input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+    input_dataset = read_csv('../data/FinalDataset.csv', header=0, index_col=0)
     dataset_key_list = list(input_dataset.keys())
-    dataset_key_list.remove('Month')
+    #dataset_key_list.remove('Month')
     get_column_to_predict(dataset_key_list)
     print("Column to predict: ", column_to_predict)
 
