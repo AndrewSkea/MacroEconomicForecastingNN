@@ -98,9 +98,9 @@ if __name__ == "__main__":
     column_to_predict = 0
     input_dataset = read_csv('../data/FinalDataset.csv', header=0, index_col=0)
     dataset_key_list = list(input_dataset.keys())
-    #dataset_key_list.remove('Month')
     get_column_to_predict(dataset_key_list)
     print("Column to predict: ", column_to_predict)
 
     data_series = list(input_dataset[column_to_predict].values)
+    data_series = data_series[int(len(data_series)*0.7):]
     rmse_result = ARIMAModel(data_series, train_test_split=0.8, col_to_predict=column_to_predict).start()

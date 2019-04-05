@@ -5,3 +5,4 @@ FirstInstance.pem
 *.pyc
 */__pycache__/*
 .idea/*
+results/*
