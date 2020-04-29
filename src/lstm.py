@@ -11,15 +11,16 @@ from keras.layers import Dense, Dropout
 from keras.layers import LSTM
 import os.path
 from keras.models import load_model
-import random
+import csv
 import time
 from dateutil.relativedelta import relativedelta
 
 
 class LSTMPredict:
-    def __init__(self, dataset, col_to_predict, look_back_period=15, num_forecasts=8, training_split=0.85, lstm_units=16,
+    def __init__(self, dataset, col_to_predict, look_back_period=15, num_forecasts=8, training_split=0.85,
+                 lstm_units=16,
                  loss_function='mean_squared_error', optimizer='sgd', num_epochs=50, batch_size=1, stationary=False,
-                 lstm_activation=None, dropout_rate=0.2, display_prediction_graph=True, save_model=True,
+                 lstm_activation=None, dropout_rate=0.1, display_prediction_graph=True, save_model=True,
                  file_path='../results/my_model.h5', load_model_from_file=False):
 
         self.dataset_copy = dataset
@@ -45,9 +46,7 @@ class LSTMPredict:
         self.save_model = save_model
         self.load_model_file = load_model_from_file
         self.file_path = file_path
-        seed = 5000
-        np.random.seed(seed)
-        random.seed(seed)
+        self.rmse_list = []
 
     def organise_dataset(self):
         if self.stationary:
@@ -96,7 +95,8 @@ class LSTMPredict:
 
         # design network
         self.model = Sequential()
-        self.model.add(LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]), stateful=True))
+        self.model.add(
+            LSTM(self.lstm_units, batch_input_shape=(self.batch_size, X.shape[1], X.shape[2]), stateful=True))
         self.model.add(Dropout(self.dropout_rate))
         self.model.add(Dense(self.num_forecasts))
         self.model.compile(loss=self.loss_function, optimizer=self.optimizer)
@@ -104,11 +104,12 @@ class LSTMPredict:
         start, updating_t = time.time(), time.time()
         print("Starting training")
         for i in range(self.num_epochs):
-            self.model.fit(X, y, epochs=1, batch_size=self.batch_size, verbose=0, shuffle=False, validation_split=len(self.test)/len(self.train))
+            self.model.fit(X, y, epochs=1, batch_size=self.batch_size, verbose=0, shuffle=False,
+                           validation_split=len(self.test) / len(self.train))
             self.model.reset_states()
             print("Epoch {}/{} - {}s".format(i, self.num_epochs, round(time.time() - updating_t, 2)))
             updating_t = time.time()
-        print("Completed in {}s".format(round(time.time()-start, 2)))
+        print("Completed in {}s".format(round(time.time() - start, 2)))
 
     # make one forecast with an LSTM,
     def forecast_lstm(self, x_data):
@@ -134,6 +135,7 @@ class LSTMPredict:
             actual = [row[i] for row in y]
             predicted = [forecast[i] for forecast in forecasts]
             rmse = sqrt(mean_squared_error(actual, predicted))
+            self.rmse_list.append(rmse)
             print('t+%d RMSE: %f' % ((i + 1), rmse))
 
     # plot the forecasts in the context of the original dataset, multiple segments
@@ -149,16 +151,16 @@ class LSTMPredict:
         else:
             series = self.original_dataset[self.col_to_predict].values
         n_test = self.test.shape[0] + self.num_forecasts - 1
-        data = DataFrame({'values':series}, index=x_labels)
+        data = DataFrame({'values': series}, index=x_labels)
         ax1.plot('values', data=data)
 
         for i in range(len(forecasts)):
-            off_s = len(series) - n_test + i# + 1
-            off_e = off_s + len(forecasts[i])# + 1
+            off_s = len(series) - n_test + i  # + 1
+            off_e = off_s + len(forecasts[i])  # + 1
             xaxis = list(x_labels.values[off_s: off_e])
             lack_of_data = len(forecasts[i]) - len(xaxis)
             if lack_of_data >= 0:
-                for l in range(lack_of_data+1):
+                for l in range(lack_of_data + 1):
                     next_date = pandas.Timestamp(xaxis[-1]).to_pydatetime() + relativedelta(months=+3)
                     xaxis.append(np.datetime64(next_date))
 
@@ -208,21 +210,32 @@ class LSTMPredict:
 
         # plot forecasts
         self.plot_forecasts(forecasts=forecasts)
+        return self.rmse_list
 
-mydateparser = lambda x: pandas.datetime.strptime(x, "%d/%m/%Y")
-data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], date_parser=mydateparser)
+for col_to_predict in ['RPI', 'GDP', 'Interest']:
+    mydateparser = lambda x: pandas.datetime.strptime(x, "%d/%m/%Y")
+    data = read_csv('../data/final_data.csv', header=0, index_col=0, parse_dates=[0], date_parser=mydateparser)
 
-col_to_predict = 'RPI'
-cols_to_use = ['GDP', 'Interest', 'Output']
-cols_to_use.append(col_to_predict) if col_to_predict not in cols_to_use else None
-data = data[cols_to_use] if len(cols_to_use) > 0 else data
+    # col_to_predict = 'RPI'
+    # cols_to_use = ['RPI', 'GDP', 'Interest']
+    cols_to_use = [col_to_predict]
+    cols_to_use.append(col_to_predict) if col_to_predict not in cols_to_use else None
+    data = data[cols_to_use] if len(cols_to_use) > 0 else data
+    print(list(data.columns))
 
-LSTMPredict(
-    dataset=data,
-    col_to_predict=col_to_predict,
-    look_back_period=12,
-    num_forecasts=1,
-    lstm_units=36,
-    num_epochs=15,
-    stationary=True  # highly recommended = True
-).start()
+    rmse_list = [LSTMPredict(
+        dataset=data,
+        col_to_predict=col_to_predict,
+        look_back_period=12,
+        num_forecasts=8,
+        lstm_units=36,
+        num_epochs=18,
+        dropout_rate=0.2,
+        stationary=True  # highly recommended = True
+    ).start() for x in range(50)]
+
+    print(rmse_list)
+
+    with open('../results/rmse_one_{}_t8.csv'.format(col_to_predict), 'w+') as my_csv:
+        csvWriter = csv.writer(my_csv, delimiter=',')
+        csvWriter.writerows(rmse_list)

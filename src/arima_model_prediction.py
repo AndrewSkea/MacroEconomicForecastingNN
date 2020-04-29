@@ -8,7 +8,7 @@ from math import sqrt
 
 
 class ARIMAModel:
-    def __init__(self, series, col_to_predict, train_test_split=0.7, validation_size=0.1, time_lags=3):
+    def __init__(self, series, col_to_predict, train_test_split=0.7, validation_size=0.11, time_lags=3):
         self.series = series
         self.train_test_split = train_test_split
         self.col_to_predict = col_to_predict
@@ -62,7 +62,7 @@ class ARIMAModel:
 
         pyplot.plot(full_x_values, self.series, label='True')
         pyplot.plot(pred_x_values, self.predictions, label='Test predictions (one-step ahead)')
-        pyplot.plot(validation_pred_x_values, self.validation_predictions, label='Validation predictions (out-of-sample)')
+        pyplot.plot(validation_pred_x_values, self.validation_predictions, label='Test predictions (out-of-sample)')
 
         pyplot.xlabel("Time units (months)")
         pyplot.ylabel(self.col_to_predict)
@@ -103,12 +103,12 @@ def get_column_to_predict(dataset_keys):
 if __name__ == "__main__":
     global column_to_predict
     column_to_predict = 0
-    input_dataset = read_csv('../data/full_data_1981_onwards_no_nan.csv', header=0, index_col=0)
+    input_dataset = read_csv('../data/final_data.csv', header=0, index_col=0)
     dataset_key_list = list(input_dataset.keys())
     # dataset_key_list.remove('Month')
     get_column_to_predict(dataset_key_list)
     print("Column to predict: ", column_to_predict)
 
     data_series = list(input_dataset[column_to_predict].values)
-    data_series = data_series[int(len(data_series)*0.7):]
-    rmse_result = ARIMAModel(data_series, train_test_split=0.8, col_to_predict=column_to_predict).start()
+    # data_series = data_series[int(len(data_series)*0.7):]
+    rmse_result = ARIMAModel(data_series, train_test_split=0.9, col_to_predict=column_to_predict).start()
